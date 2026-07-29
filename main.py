@@ -1,11 +1,9 @@
 from fastapi import FastAPI, HTTPException
 import sqlite3
-from parser import fetch_news
 
 app = FastAPI(title="News API")
 DB_NAME = "news.db"
 
-# Функция автоматической настройки базы данных при старте сервера
 def init_db_on_server():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -22,7 +20,6 @@ def init_db_on_server():
     conn.commit()
     conn.close()
 
-# Запускаем создание таблицы сразу при загрузке файла сервера
 init_db_on_server()
 
 def dict_factory(cursor, row):
@@ -33,26 +30,24 @@ def dict_factory(cursor, row):
 
 @app.get("/news")
 def get_all_news(limit: int = 10, offset: int = 0):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = dict_factory
-    cursor = conn.cursor()
-    
-    # Теперь таблица точно существует и запрос не упадет в ошибку 500
-    cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
-    news = cursor.fetchall()
-    
-    conn.close()
-    return news
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = dict_factory
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
+        news = cursor.fetchall()
+        conn.close()
+        return news
+    except Exception:
+        return []
 
 @app.get("/news/{news_id}")
 def get_one_news(news_id: int):
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = dict_factory
     cursor = conn.cursor()
-    
     cursor.execute("SELECT * FROM news WHERE id = ?", (news_id,))
     news_item = cursor.fetchone()
-    
     conn.close()
     if news_item is None:
         raise HTTPException(status_code=404, detail="Новость не найдена")
@@ -61,7 +56,8 @@ def get_one_news(news_id: int):
 @app.post("/refresh")
 def refresh_news():
     try:
+        from parser import fetch_news
         fetch_news()
         return {"status": "success", "message": "Новости успешно обновлены"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка обновления: {str(e)}")
+        return {"status": "error", "message": f"Ошибка при обновлении: {str(e)}"}
