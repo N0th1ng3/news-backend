@@ -58,6 +58,8 @@ def refresh_news():
     try:
         from parser import fetch_news
         fetch_news()
-        return {"status": "success", "message": "Новости успешно обновлены"}
+        return {"status": "success", "message": "Новости успешно обновлены из сети"}
     except Exception as e:
-        return {"status": "error", "message": f"Ошибка при обновлении: {str(e)}"}
+        # Ловим любую сетевую ошибку или блокировку сайта, чтобы сервер НЕ падал
+        print(f"Ошибка при сборе новостей с сайта: {e}")
+        return {"status": "error", "message": f"Сайт временно недоступен или заблокировал запрос: {str(e)}"}
