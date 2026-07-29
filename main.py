@@ -41,17 +41,23 @@ def get_all_news(limit: int = 10, offset: int = 0):
     except Exception:
         return []
 
-@app.get("/news/{news_id}")
-def get_one_news(news_id: int):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = dict_factory
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM news WHERE id = ?", (news_id,))
-    news_item = cursor.fetchone()
-    conn.close()
-    if news_item is None:
-        raise HTTPException(status_code=404, detail="Новость не найдена")
-    return news_item
+@app.get("/news")
+def get_all_news(limit: int = 10, offset: int = 0):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        # Принудительно заставляем SQLite работать с текстом как со строками UTF-8
+        conn.text_factory = str  
+        conn.row_factory = dict_factory
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
+        news = cursor.fetchall()
+        conn.close()
+        return news
+    except Exception as e:
+        print(f"Ошибка чтения из базы данных: {e}")
+        return []
+
 
 @app.post("/refresh")
 def refresh_news():
