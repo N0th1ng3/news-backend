@@ -1,31 +1,45 @@
+import os
 import sqlite3
+import subprocess
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
 URL = "https://admprom.ru"
 
+def ensure_chromium_installed():
+    """Проверяет наличие браузера Chromium и ставит его программно при отсутствии"""
+    try:
+        print("Проверка готовности невидимого браузера...")
+        with sync_playwright() as p:
+            p.chromium.launch(headless=True).close()
+        print("Браузер Chromium обнаружен и готов к работе.")
+    except Exception:
+        print("Браузер не найден в системе. Запуск автоматической установки Chromium...")
+        try:
+            # Вызываем системную команду установки браузера прямо из Python
+            subprocess.run(["playwright", "install", "chromium"], check=True)
+            print("Chromium успешно установлен силами скрипта!")
+        except Exception as install_error:
+            print(f"Критическая ошибка программной установки браузера: {install_error}")
+
 def fetch_news():
-    print("Запуск скрытого браузера для обхода защиты admprom.ru...")
+    print("Запуск сборщика реальных новостей с admprom.ru...")
     
-    # 1. Запускаем инструменты Playwright
+    # Скрипт сам накатит браузер на сервер Render в реальном времени!
+    ensure_chromium_installed()
+    
     with sync_playwright() as p:
         try:
-            # Запускаем невидимый браузер (headless=True означает без открытия окна)
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             
-            # Открываем сайт администрации
             print("Подключаемся к сайту в режиме реального времени...")
             page.goto(URL, timeout=30000)
-            
-            # Ждем 3 секунды, чтобы сайт прогрузил все скрипты защиты
             page.wait_for_timeout(3000)
             
-            # Забираем чистый HTML, который прошел все проверки
             html_content = page.content()
             browser.close()
             
-            # 2. Передаем код страницы в BeautifulSoup для разбора новостей
             soup = BeautifulSoup(html_content, 'html.parser')
             links = soup.find_all('a')
             
@@ -35,7 +49,6 @@ def fetch_news():
             
             for index, link in enumerate(links):
                 href = link.get('href', '')
-                # Ищем ссылки с текстом "Подробнее" (так на сайте оформлены пресс-релизы)
                 if "Подробнее" in link.get_text():
                     parent = link.find_parent()
                     if parent:
