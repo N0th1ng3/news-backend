@@ -3,8 +3,8 @@
 Прослойка (микросервис) между официальным сайтом Администрации Промышленновского округа и мобильным приложением. Собирает новости в режиме реального времени, кэширует в локальную базу данных и предоставляет REST API.
 
 ## Развернутое демо
-* **API Список новостей**: [https://onrender.com](https://onrender.com)
-* **Интерактивная документация (Swagger)**: [https://onrender.com](https://onrender.com)
+* **API Список новостей**: [https://onrender.com](https://news-backend-90uu.onrender.com/news)
+* **Интерактивная документация (Swagger)**: [https://onrender.com](https://news-backend-90uu.onrender.com/docs)
 
 ## Технологический стек
 * **Язык**: Python 3.14
