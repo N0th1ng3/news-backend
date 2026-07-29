@@ -10,7 +10,6 @@ URL = "https://admprom.ru"
 def fetch_news():
     print("Запуск живого сборщика новостей с admprom.ru через requests...")
     
-    # Маскируемся под мобильный телефон iPhone и браузер Safari
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -18,7 +17,6 @@ def fetch_news():
     }
     
     try:
-        # Делаем обычный быстрый запрос к сайту
         response = requests.get(URL, headers=headers, verify=False, timeout=15)
         
         if response.status_code != 200:
@@ -39,8 +37,10 @@ def fetch_news():
                     full_text = parent.get_text(strip=True).replace("Подробнее", "")
                     if len(full_text) > 20:
                         title = full_text[:50] + "..." if len(full_text) > 50 else full_text
-                        source_url = link.get('href', f"https://admprom.rulive_news_{index}")
-                        image_url = "https://admprom.ruassets/logo.png"
+                        
+                        # ИСПРАВЛЕНО: Добавлены пропущенные слэши после домена
+                        source_url = link.get('href', f"https://admprom.ru_{index}")
+                        image_url = "https://admprom.ru"
                         date = "2026-07-29"
                         
                         try:

@@ -32,24 +32,9 @@ def dict_factory(cursor, row):
 def get_all_news(limit: int = 10, offset: int = 0):
     try:
         conn = sqlite3.connect(DB_NAME)
+        conn.text_factory = str  # Защита кодировки
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
-        news = cursor.fetchall()
-        conn.close()
-        return news
-    except Exception:
-        return []
-
-@app.get("/news")
-def get_all_news(limit: int = 10, offset: int = 0):
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        # Принудительно заставляем SQLite работать с текстом как со строками UTF-8
-        conn.text_factory = str  
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        
         cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
         news = cursor.fetchall()
         conn.close()
@@ -58,6 +43,17 @@ def get_all_news(limit: int = 10, offset: int = 0):
         print(f"Ошибка чтения из базы данных: {e}")
         return []
 
+@app.get("/news/{news_id}")
+def get_one_news(news_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = dict_factory
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM news WHERE id = ?", (news_id,))
+    news_item = cursor.fetchone()
+    conn.close()
+    if news_item is None:
+        raise HTTPException(status_code=404, detail="Новость не найдена")
+    return news_item
 
 @app.post("/refresh")
 def refresh_news():
@@ -66,6 +62,5 @@ def refresh_news():
         fetch_news()
         return {"status": "success", "message": "Новости успешно обновлены из сети"}
     except Exception as e:
-        # Ловим любую сетевую ошибку или блокировку сайта, чтобы сервер НЕ падал
         print(f"Ошибка при сборе новостей с сайта: {e}")
-        return {"status": "error", "message": f"Сайт временно недоступен или заблокировал запрос: {str(e)}"}
+        return {"status": "error", "message": f"Сайт заблокировал запрос: {str(e)}"}
