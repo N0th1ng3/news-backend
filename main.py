@@ -20,10 +20,10 @@ def init_db_on_server():
     conn.commit()
     conn.close()
 
-# 1. Автоматически создаем таблицу при старте сервера
+# Автоматически создаем таблицу при старте сервера
 init_db_on_server()
 
-# 2. Красивый ход: автоматически собираем свежие новости при каждом запуске сервера
+# Автоматический запуск сборщика при старте
 try:
     from parser import fetch_news
     fetch_news()
@@ -33,14 +33,15 @@ except Exception as e:
 def dict_factory(cursor, row):
     d = {}
     for idx, col in enumerate(cursor.description):
-        d[col] = row[idx]  
+        # ИСПРАВЛЕНО: берем col[0], чтобы получить строго строку-название колонки
+        d[col[0]] = row[idx]  
     return d
 
 @app.get("/news")
 def get_all_news(limit: int = 10, offset: int = 0):
     try:
         conn = sqlite3.connect(DB_NAME)
-        conn.text_factory = str  
+        conn.text_factory = str  # Защита кодировки
         conn.row_factory = dict_factory
         cursor = conn.cursor()
         
@@ -76,4 +77,4 @@ def refresh_news():
         return {"status": "success", "message": "Новости успешно обновлены из сети"}
     except Exception as e:
         print(f"Ошибка при сборе новостей с сайта: {e}")
-        return {"status": "error", "message": f"Сайт заблокировал запрос: {str(e)}"}
+        return {"status": "error", "message": f"Сайт временно недоступен: {str(e)}"}
