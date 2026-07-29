@@ -20,23 +20,27 @@ def init_db_on_server():
     conn.commit()
     conn.close()
 
+# Автоматически создаем таблицу при старте сервера
 init_db_on_server()
 
 def dict_factory(cursor, row):
     d = {}
     for idx, col in enumerate(cursor.description):
-        d[col] = row[idx]
+        # col[0] берет строго текстовое имя колонки, исправляя ошибку TypeError
+        d[col[0]] = row[idx]  
     return d
 
 @app.get("/news")
 def get_all_news(limit: int = 10, offset: int = 0):
     try:
         conn = sqlite3.connect(DB_NAME)
-        conn.text_factory = str  # Защита кодировки
+        conn.text_factory = str  # Защита от кривой кодировки спецсимволов
         conn.row_factory = dict_factory
         cursor = conn.cursor()
+        
         cursor.execute("SELECT * FROM news LIMIT ? OFFSET ?", (limit, offset))
         news = cursor.fetchall()
+        
         conn.close()
         return news
     except Exception as e:
@@ -48,9 +52,12 @@ def get_one_news(news_id: int):
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = dict_factory
     cursor = conn.cursor()
+    
     cursor.execute("SELECT * FROM news WHERE id = ?", (news_id,))
     news_item = cursor.fetchone()
+    
     conn.close()
+    
     if news_item is None:
         raise HTTPException(status_code=404, detail="Новость не найдена")
     return news_item
@@ -63,4 +70,4 @@ def refresh_news():
         return {"status": "success", "message": "Новости успешно обновлены из сети"}
     except Exception as e:
         print(f"Ошибка при сборе новостей с сайта: {e}")
-        return {"status": "error", "message": f"Сайт заблокировал запрос: {str(e)}"}
+        return {"status": "error", "message": f"Сайт временно недоступен или заблокировал запрос: {str(e)}"}
