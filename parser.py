@@ -2,6 +2,7 @@ import sqlite3
 import requests
 from bs4 import BeautifulSoup
 import urllib3
+from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -30,6 +31,9 @@ def fetch_news():
         cursor = conn.cursor()
         added_count = 0
         
+        # Получаем реальную текущую дату и время для каждой новости
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         for index, link in enumerate(links):
             if "Подробнее" in link.get_text():
                 parent = link.find_parent()
@@ -38,18 +42,15 @@ def fetch_news():
                     if len(full_text) > 20:
                         title = full_text[:50] + "..." if len(full_text) > 50 else full_text
                         
-                        # ИСПРАВЛЕНО: Добавлены пропущенные слэши после домена
                         source_url = link.get('href', f"https://admprom.ru_{index}")
                         image_url = "https://admprom.ru"
-                        date = "2026-07-29"
                         
                         try:
                             cursor.execute('''
                                 INSERT INTO news (title, text, image_url, source_url, published_at)
                                 VALUES (?, ?, ?, ?, ?)
-                            ''', (title, full_text, image_url, source_url, date))
+                            ''', (title, full_text, image_url, source_url, current_date))
                             added_count += 1
-                            print(f"-> Найдена новость: {title}")
                         except sqlite3.IntegrityError:
                             pass
 
