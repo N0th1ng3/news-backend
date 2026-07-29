@@ -1,81 +1,64 @@
-import os
 import sqlite3
-import subprocess
-from playwright.sync_api import sync_playwright
+import requests
 from bs4 import BeautifulSoup
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL = "https://admprom.ru"
 
-def ensure_chromium_installed():
-    """Проверяет наличие браузера Chromium и ставит его программно при отсутствии"""
-    try:
-        print("Проверка готовности невидимого браузера...")
-        with sync_playwright() as p:
-            p.chromium.launch(headless=True).close()
-        print("Браузер Chromium обнаружен и готов к работе.")
-    except Exception:
-        print("Браузер не найден в системе. Запуск автоматической установки Chromium...")
-        try:
-            # Вызываем системную команду установки браузера прямо из Python
-            subprocess.run(["playwright", "install", "chromium"], check=True)
-            print("Chromium успешно установлен силами скрипта!")
-        except Exception as install_error:
-            print(f"Критическая ошибка программной установки браузера: {install_error}")
-
 def fetch_news():
-    print("Запуск сборщика реальных новостей с admprom.ru...")
+    print("Запуск живого сборщика новостей с admprom.ru через requests...")
     
-    # Скрипт сам накатит браузер на сервер Render в реальном времени!
-    ensure_chromium_installed()
+    # Маскируемся под мобильный телефон iPhone и браузер Safari
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru"
+    }
     
-    with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+    try:
+        # Делаем обычный быстрый запрос к сайту
+        response = requests.get(URL, headers=headers, verify=False, timeout=15)
+        
+        if response.status_code != 200:
+            print(f"Сайт заблокировал запрос. Статус-код: {response.status_code}")
+            return
             
-            print("Подключаемся к сайту в режиме реального времени...")
-            page.goto(URL, timeout=30000)
-            page.wait_for_timeout(3000)
-            
-            html_content = page.content()
-            browser.close()
-            
-            soup = BeautifulSoup(html_content, 'html.parser')
-            links = soup.find_all('a')
-            
-            conn = sqlite3.connect("news.db")
-            cursor = conn.cursor()
-            added_count = 0
-            
-            for index, link in enumerate(links):
-                href = link.get('href', '')
-                if "Подробнее" in link.get_text():
-                    parent = link.find_parent()
-                    if parent:
-                        full_text = parent.get_text(strip=True).replace("Подробнее", "")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = soup.find_all('a')
+        
+        conn = sqlite3.connect("news.db")
+        cursor = conn.cursor()
+        added_count = 0
+        
+        for index, link in enumerate(links):
+            if "Подробнее" in link.get_text():
+                parent = link.find_parent()
+                if parent:
+                    full_text = parent.get_text(strip=True).replace("Подробнее", "")
+                    if len(full_text) > 20:
+                        title = full_text[:50] + "..." if len(full_text) > 50 else full_text
+                        source_url = link.get('href', f"https://admprom.rulive_news_{index}")
+                        image_url = "https://admprom.ruassets/logo.png"
+                        date = "2026-07-29"
                         
-                        if len(full_text) > 20:
-                            title = full_text[:50] + "..." if len(full_text) > 50 else full_text
-                            source_url = href if href else f"https://admprom.rulive_news_{index}"
-                            image_url = "https://admprom.ruassets/logo.png"
-                            date = "2026-07-29"
-                            
-                            try:
-                                cursor.execute('''
-                                    INSERT INTO news (title, text, image_url, source_url, published_at)
-                                    VALUES (?, ?, ?, ?, ?)
-                                ''', (title, full_text, image_url, source_url, date))
-                                added_count += 1
-                                print(f"-> Добавлена живая новость: {title}")
-                            except sqlite3.IntegrityError:
-                                pass
+                        try:
+                            cursor.execute('''
+                                INSERT INTO news (title, text, image_url, source_url, published_at)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (title, full_text, image_url, source_url, date))
+                            added_count += 1
+                            print(f"-> Найдена новость: {title}")
+                        except sqlite3.IntegrityError:
+                            pass
 
-            conn.commit()
-            conn.close()
-            print(f"Сборка завершена успешно! Добавлено новых новостей: {added_count}")
-            
-        except Exception as e:
-            print(f"Ошибка при работе живого сборщика: {e}")
+        conn.commit()
+        conn.close()
+        print(f"Сборка завершена успешно! Добавлено живых новостей: {added_count}")
+        
+    except Exception as e:
+        print(f"Ошибка при работе живого сборщика: {e}")
 
 if __name__ == "__main__":
     fetch_news()
