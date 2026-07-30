@@ -21,18 +21,16 @@ def fetch_inner_news_details(news_url, headers):
             
         inner_soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Сбор точного полного заголовка без обрезаний и точек
-        # Ищем главный тег заголовка h1 на странице новости (стандарт для WordPress статей)
+        # Сбор точного полного заголовка без обрезаний и точек
         title_tag = inner_soup.find('h1', class_='entry-title') or inner_soup.find('h1') or inner_soup.find('h2')
         if title_tag:
             full_title = title_tag.get_text(strip=True)
         else:
             full_title = None
 
-        # Находим контейнер контента статьи
         content_div = inner_soup.find('div', class_='entry-content') or inner_soup.find('article')
         
-        # 2. Сбор полноценного текста новости (раздельно по абзацам)
+        # Сбор полноценного текста новости (раздельно по абзацам)
         if content_div:
             paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
             clean_paragraphs = [p for p in paragraphs if len(p) > 5 and "Подробнее" not in p]
@@ -40,7 +38,7 @@ def fetch_inner_news_details(news_url, headers):
         else:
             full_text = "Не удалось извлечь содержимое статьи."
 
-        # 3. Сбор ВСЕХ картинок внутри новости
+        # Сбор ВСЕХ картинок внутри новости
         images_found = []
         if content_div:
             img_tags = content_div.find_all('img')
@@ -75,9 +73,7 @@ def fetch_news():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ru"
     }
-    cursor.execute("DELETE FROM news")
-    added_count = 0
-    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     try:
         response = requests.get(BASE_URL, headers=headers, verify=False, timeout=15)
         if response.status_code != 200:
@@ -87,8 +83,14 @@ def fetch_news():
         soup = BeautifulSoup(response.text, 'html.parser')
         links = soup.find_all('a')
         
+        # ИСПРАВЛЕНО: Сначала открываем соединение и создаем cursor
         conn = sqlite3.connect("news.db")
         cursor = conn.cursor()
+        
+        # ТЕПЕРЬ ВСЁ ПРАВИЛЬНО: Очищаем старые обрезанные новости
+        cursor.execute("DELETE FROM news")
+        conn.commit()
+        
         added_count = 0
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
@@ -101,20 +103,13 @@ def fetch_news():
                 if not source_url.startswith("http"):
                     source_url = BASE_URL + source_url
 
-                # Пропускаем, если новость уже в базе
-                cursor.execute("SELECT id FROM news WHERE source_url = ?", (source_url,))
-                if cursor.fetchone():
-                    continue
-
                 # Заходим внутрь статьи за полными данными
                 inner_title, full_text, image_urls_list = fetch_inner_news_details(source_url, headers)
                 
-                # Если внутри h1 не нашёлся, берём резервный заголовок с главной
                 if not inner_title:
                     parent = link.find_parent()
                     if parent:
-                        parent_text = parent.get_text(strip=True).replace("Подробнее", "")
-                        inner_title = parent_text
+                        inner_title = parent.get_text(strip=True).replace("Подробнее", "")
                     else:
                         inner_title = "Новость округа"
 
