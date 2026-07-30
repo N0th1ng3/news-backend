@@ -75,7 +75,9 @@ def fetch_news():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ru"
     }
-    
+    cursor.execute("DELETE FROM news")
+    added_count = 0
+    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         response = requests.get(BASE_URL, headers=headers, verify=False, timeout=15)
         if response.status_code != 200:
