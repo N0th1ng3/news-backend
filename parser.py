@@ -10,30 +10,37 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BASE_URL = "https://admprom.ru"
 
 def fetch_inner_news_details(news_url, headers):
-    """Заходит внутрь новости, собирает чистый текст статьи и ВСЕ картинки из неё"""
+    """Заходит внутрь новости, собирает ОРИГИНАЛЬНЫЙ ПОЛНЫЙ заголовок, текст статьи и ВСЕ картинки"""
     try:
         if not news_url.startswith("http"):
             news_url = BASE_URL + news_url
             
         response = requests.get(news_url, headers=headers, verify=False, timeout=10)
         if response.status_code != 200:
-            return "Текст новости временно недоступен.", "https://admprom.ru"
+            return None, "Текст новости временно недоступен.", "https://admprom.ru"
             
         inner_soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Находим контейнер статьи (entry-content — стандартный класс для WordPress)
+        # 1. Сбор точного полного заголовка без обрезаний и точек
+        # Ищем главный тег заголовка h1 на странице новости (стандарт для WordPress статей)
+        title_tag = inner_soup.find('h1', class_='entry-title') or inner_soup.find('h1') or inner_soup.find('h2')
+        if title_tag:
+            full_title = title_tag.get_text(strip=True)
+        else:
+            full_title = None
+
+        # Находим контейнер контента статьи
         content_div = inner_soup.find('div', class_='entry-content') or inner_soup.find('article')
         
-        # 1. Сбор полноценного текста новости (раздельно по абзацам)
+        # 2. Сбор полноценного текста новости (раздельно по абзацам)
         if content_div:
             paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
-            # Отфильтровываем пустые строки и технические подписи
             clean_paragraphs = [p for p in paragraphs if len(p) > 5 and "Подробнее" not in p]
             full_text = "\n\n".join(clean_paragraphs)
         else:
             full_text = "Не удалось извлечь содержимое статьи."
 
-        # 2. Сбор ВСЕХ картинок внутри новости
+        # 3. Сбор ВСЕХ картинок внутри новости
         images_found = []
         if content_div:
             img_tags = content_div.find_all('img')
@@ -44,27 +51,24 @@ def fetch_inner_news_details(news_url, headers):
                 elif src and src.startswith("/"):
                     images_found.append(BASE_URL + src)
 
-        # Если внутри текста картинок нет, ищем главное превью новости
         if not images_found:
             featured_img = inner_soup.find('img', class_='wp-post-image')
             if featured_img and featured_img.get('src'):
                 src = featured_img.get('src')
                 images_found.append(src if src.startswith("http") else BASE_URL + src)
 
-        # Если картинок вообще нет на странице, ставим стандартный логотип
         if not images_found:
             images_found.append("https://admprom.ru")
 
-        # Объединяем все ссылки на найденные картинки через запятую
         all_images_str = ",".join(images_found)
 
-        return full_text, all_images_str
+        return full_title, full_text, all_images_str
     except Exception as e:
         print(f"Ошибка при глубоком парсинге статьи {news_url}: {e}")
-        return "Ошибка загрузки текста.", "https://admprom.ru"
+        return None, "Ошибка загрузки текста.", "https://admprom.ru"
 
 def fetch_news():
-    print("Запуск глубокого раздельного парсинга (заголовки + тексты + галереи)...")
+    print("Запуск парсинга полных заголовков, текстов и галерей...")
     
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
@@ -95,44 +99,38 @@ def fetch_news():
                 if not source_url.startswith("http"):
                     source_url = BASE_URL + source_url
 
-                # Защита от дубликатов: пропускаем, если новость уже в нашей базе
+                # Пропускаем, если новость уже в базе
                 cursor.execute("SELECT id FROM news WHERE source_url = ?", (source_url,))
                 if cursor.fetchone():
                     continue
 
-                # Ищем заголовок отдельно. Обычно он лежит в соседнем теге h3 или блоке выше ссылки
-                parent = link.find_parent()
-                title = "Новость округа"
-                if parent:
-                    # Пробуем вытащить чистый текст из заголовка h3 внутри этого же блока
-                    h3_tag = parent.find('h3') or parent.find_previous('h3')
-                    if h3_tag:
-                        title = h3_tag.get_text(strip=True)
-                    else:
-                        # Если h3 нет, берем первые 60 символов текста родителя как заголовок
-                        parent_text = parent.get_text(strip=True).replace("Подробнее", "")
-                        title = parent_text[:60] + "..." if len(parent_text) > 60 else parent_text
-
-                print(f"-> Найдена новая статья. Заголовок: {title}")
-                print(f"   Заходим внутрь для сбора контента...")
+                # Заходим внутрь статьи за полными данными
+                inner_title, full_text, image_urls_list = fetch_inner_news_details(source_url, headers)
                 
-                # Заходим внутрь статьи за раздельной новостью и списком картинок
-                full_text, image_urls_list = fetch_inner_news_details(source_url, headers)
+                # Если внутри h1 не нашёлся, берём резервный заголовок с главной
+                if not inner_title:
+                    parent = link.find_parent()
+                    if parent:
+                        parent_text = parent.get_text(strip=True).replace("Подробнее", "")
+                        inner_title = parent_text
+                    else:
+                        inner_title = "Новость округа"
+
+                print(f"-> Сохраняем статью с полным заголовком: {inner_title}")
 
                 try:
                     cursor.execute('''
                         INSERT INTO news (title, text, image_url, source_url, published_at)
                         VALUES (?, ?, ?, ?, ?)
-                    ''', (title, full_text, image_urls_list, source_url, current_date))
+                    ''', (inner_title, full_text, image_urls_list, source_url, current_date))
                     added_count += 1
-                    print("   Успешно сохранено в базу данных.")
-                    time.sleep(1) # Пауза в 1 секунду, чтобы сайт администрации не забанил наш сервер за парсинг
+                    time.sleep(1)
                 except sqlite3.IntegrityError:
                     pass
 
         conn.commit()
         conn.close()
-        print(f"Раздельный сбор завершен! Добавлено полноценных новостей: {added_count}")
+        print(f"Сбор завершен! Добавлено полноценных новостей: {added_count}")
         
     except Exception as e:
         print(f"Ошибка при работе живого сборщика: {e}")
