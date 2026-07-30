@@ -21,16 +21,13 @@ def fetch_inner_news_details(news_url, headers):
             
         inner_soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Сбор точного полного заголовка без обрезаний и точек
+        # 1. Поиск главного тега заголовка
         title_tag = inner_soup.find('h1', class_='entry-title') or inner_soup.find('h1') or inner_soup.find('h2')
-        if title_tag:
-            full_title = title_tag.get_text(strip=True)
-        else:
-            full_title = None
+        full_title = title_tag.get_text(strip=True) if title_tag else None
 
         content_div = inner_soup.find('div', class_='entry-content') or inner_soup.find('article')
         
-        # Сбор полноценного текста новости (раздельно по абзацам)
+        # 2. Сбор полноценного текста новости (раздельно по абзацам)
         if content_div:
             paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
             clean_paragraphs = [p for p in paragraphs if len(p) > 5 and "Подробнее" not in p]
@@ -38,7 +35,22 @@ def fetch_inner_news_details(news_url, headers):
         else:
             full_text = "Не удалось извлечь содержимое статьи."
 
-        # Сбор ВСЕХ картинок внутри новости
+        # КРАСИВЫЙ ХОД: Если заголовка h1 нет или он содержит три точки на конце, генерируем его из первого предложения полного текста
+        if not full_title or "..." in full_title or "…" in full_title:
+            if clean_paragraphs:
+                first_paragraph = clean_paragraphs[0]
+                # Берем первое предложение до точки
+                if "." in first_paragraph:
+                    full_title = first_paragraph.split(".")[0].strip() + "."
+                else:
+                    full_title = first_paragraph[:100].strip()
+            else:
+                full_title = "Новость округа"
+
+        # Окончательно очищаем заголовок от любых случайных троеточий на конце
+        full_title = full_title.rstrip(".… ").strip()
+
+        # 3. Сбор ВСЕХ картинок внутри новости
         images_found = []
         if content_div:
             img_tags = content_div.find_all('img')
@@ -63,7 +75,7 @@ def fetch_inner_news_details(news_url, headers):
         return full_title, full_text, all_images_str
     except Exception as e:
         print(f"Ошибка при глубоком парсинге статьи {news_url}: {e}")
-        return None, "Ошибка загрузки текста.", "https://admprom.ru"
+        return "Новость округа", "Ошибка загрузки текста.", "https://admprom.ru"
 
 def fetch_news():
     print("Запуск парсинга полных заголовков, текстов и галерей...")
@@ -83,11 +95,10 @@ def fetch_news():
         soup = BeautifulSoup(response.text, 'html.parser')
         links = soup.find_all('a')
         
-        # ИСПРАВЛЕНО: Сначала открываем соединение и создаем cursor
         conn = sqlite3.connect("news.db")
         cursor = conn.cursor()
         
-        # ТЕПЕРЬ ВСЁ ПРАВИЛЬНО: Очищаем старые обрезанные новости
+        # Очищаем базу, чтобы заново перекачать с чистыми заголовками
         cursor.execute("DELETE FROM news")
         conn.commit()
         
@@ -105,15 +116,6 @@ def fetch_news():
 
                 # Заходим внутрь статьи за полными данными
                 inner_title, full_text, image_urls_list = fetch_inner_news_details(source_url, headers)
-                
-                if not inner_title:
-                    parent = link.find_parent()
-                    if parent:
-                        inner_title = parent.get_text(strip=True).replace("Подробнее", "")
-                    else:
-                        inner_title = "Новость округа"
-
-                print(f"-> Сохраняем статью с полным заголовком: {inner_title}")
 
                 try:
                     cursor.execute('''
@@ -121,6 +123,7 @@ def fetch_news():
                         VALUES (?, ?, ?, ?, ?)
                     ''', (inner_title, full_text, image_urls_list, source_url, current_date))
                     added_count += 1
+                    print(f"-> Сохранена статья: {inner_title}")
                     time.sleep(1)
                 except sqlite3.IntegrityError:
                     pass
