@@ -9,52 +9,62 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_URL = "https://admprom.ru"
 
-def fetch_full_news_data(news_url, headers):
-    """Заходит внутрь новости и забирает полный текст статьи и картинку"""
+def fetch_inner_news_details(news_url, headers):
+    """Заходит внутрь новости, собирает чистый текст статьи и ВСЕ картинки из неё"""
     try:
-        # Если ссылка относительная, превращаем её в абсолютную
         if not news_url.startswith("http"):
             news_url = BASE_URL + news_url
             
         response = requests.get(news_url, headers=headers, verify=False, timeout=10)
         if response.status_code != 200:
-            return None, None
+            return "Текст новости временно недоступен.", "https://admprom.ru"
             
         inner_soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Поиск полноценного текста новости (ориентируемся на теги абзацев внутри контента)
+        # Находим контейнер статьи (entry-content — стандартный класс для WordPress)
         content_div = inner_soup.find('div', class_='entry-content') or inner_soup.find('article')
-        if content_div:
-            # Собираем текст всех абзацев внутри статьи
-            paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
-            full_text = "\n\n".join([p for p in paragraphs if len(p) > 5])
-        else:
-            full_text = inner_soup.get_text(strip=True)[:1000] # Заглушка, если структура сломалась
-
-        # 2. Поиск оригинальной картинки новости
-        image_url = None
-        if content_div:
-            img_tag = content_div.find('img')
-            if img_tag:
-                image_url = img_tag.get('src')
         
-        # Если внутри текста нет картинки, ищем главное превью (featured image)
-        if not image_url:
-            img_tag = inner_soup.find('img', class_='wp-post-image') or inner_soup.find('img')
-            if img_tag:
-                image_url = img_tag.get('src')
+        # 1. Сбор полноценного текста новости (раздельно по абзацам)
+        if content_div:
+            paragraphs = [p.get_text(strip=True) for p in content_div.find_all('p')]
+            # Отфильтровываем пустые строки и технические подписи
+            clean_paragraphs = [p for p in paragraphs if len(p) > 5 and "Подробнее" not in p]
+            full_text = "\n\n".join(clean_paragraphs)
+        else:
+            full_text = "Не удалось извлечь содержимое статьи."
 
-        # Делаем ссылку на картинку абсолютной
-        if image_url and not image_url.startswith("http"):
-            image_url = BASE_URL + image_url
+        # 2. Сбор ВСЕХ картинок внутри новости
+        images_found = []
+        if content_div:
+            img_tags = content_div.find_all('img')
+            for img in img_tags:
+                src = img.get('src')
+                if src and src.startswith("http") and "logo" not in src:
+                    images_found.append(src)
+                elif src and src.startswith("/"):
+                    images_found.append(BASE_URL + src)
 
-        return full_text, image_url
+        # Если внутри текста картинок нет, ищем главное превью новости
+        if not images_found:
+            featured_img = inner_soup.find('img', class_='wp-post-image')
+            if featured_img and featured_img.get('src'):
+                src = featured_img.get('src')
+                images_found.append(src if src.startswith("http") else BASE_URL + src)
+
+        # Если картинок вообще нет на странице, ставим стандартный логотип
+        if not images_found:
+            images_found.append("https://admprom.ru")
+
+        # Объединяем все ссылки на найденные картинки через запятую
+        all_images_str = ",".join(images_found)
+
+        return full_text, all_images_str
     except Exception as e:
-        print(f"Ошибка при парсинге страницы новости {news_url}: {e}")
-        return None, None
+        print(f"Ошибка при глубоком парсинге статьи {news_url}: {e}")
+        return "Ошибка загрузки текста.", "https://admprom.ru"
 
 def fetch_news():
-    print("Запуск глубокого сетевого парсинга новостей...")
+    print("Запуск глубокого раздельного парсинга (заголовки + тексты + галереи)...")
     
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
@@ -85,37 +95,44 @@ def fetch_news():
                 if not source_url.startswith("http"):
                     source_url = BASE_URL + source_url
 
-                # Проверяем, есть ли уже эта новость в нашей базе, чтобы не тратить время на парсинг текста заново
+                # Защита от дубликатов: пропускаем, если новость уже в нашей базе
                 cursor.execute("SELECT id FROM news WHERE source_url = ?", (source_url,))
                 if cursor.fetchone():
                     continue
 
+                # Ищем заголовок отдельно. Обычно он лежит в соседнем теге h3 или блоке выше ссылки
                 parent = link.find_parent()
-                title = parent.get_text(strip=True).replace("Подробнее", "")[:80] + "..." if parent else "Новость округа"
+                title = "Новость округа"
+                if parent:
+                    # Пробуем вытащить чистый текст из заголовка h3 внутри этого же блока
+                    h3_tag = parent.find('h3') or parent.find_previous('h3')
+                    if h3_tag:
+                        title = h3_tag.get_text(strip=True)
+                    else:
+                        # Если h3 нет, берем первые 60 символов текста родителя как заголовок
+                        parent_text = parent.get_text(strip=True).replace("Подробнее", "")
+                        title = parent_text[:60] + "..." if len(parent_text) > 60 else parent_text
 
-                print(f"Парсинг статьи: {title}")
-                # Переходим внутрь ссылки за полным текстом и картинкой
-                full_text, image_url = fetch_full_news_data(source_url, headers)
+                print(f"-> Найдена новая статья. Заголовок: {title}")
+                print(f"   Заходим внутрь для сбора контента...")
                 
-                # Если текст не собрался, берем короткий кусок с главной
-                if not full_text:
-                    full_text = parent.get_text(strip=True).replace("Подробнее", "") if parent else "Текст отсутствует"
-                if not image_url:
-                    image_url = "https://admprom.ru"
+                # Заходим внутрь статьи за раздельной новостью и списком картинок
+                full_text, image_urls_list = fetch_inner_news_details(source_url, headers)
 
                 try:
                     cursor.execute('''
                         INSERT INTO news (title, text, image_url, source_url, published_at)
                         VALUES (?, ?, ?, ?, ?)
-                    ''', (title, full_text, image_url, source_url, current_date))
+                    ''', (title, full_text, image_urls_list, source_url, current_date))
                     added_count += 1
-                    time.sleep(1) # Небольшая пауза, чтобы сайт администрации не забанил сервер за спам-запросы
+                    print("   Успешно сохранено в базу данных.")
+                    time.sleep(1) # Пауза в 1 секунду, чтобы сайт администрации не забанил наш сервер за парсинг
                 except sqlite3.IntegrityError:
                     pass
 
         conn.commit()
         conn.close()
-        print(f"Глубокий сбор завершен! Добавлено полноценных новостей: {added_count}")
+        print(f"Раздельный сбор завершен! Добавлено полноценных новостей: {added_count}")
         
     except Exception as e:
         print(f"Ошибка при работе живого сборщика: {e}")
